@@ -2,27 +2,31 @@ from PIL import Image
 import cv2
 import numpy as np
 
-# ---------------- Configuration ----------------
 BOARD_WIDTH_IN = 32
 BOARD_HEIGHT_IN = 20
 CIRCLE_DIAMETER_IN = 12
-IMAGE_PATH = "referensbildWARPED.webp"
+IMAGE_PATH = "svart.jpg"
 WINDOW_NAME = "Board Image"
 
-# ---------------- Functions ----------------
-def prepare_image(img: Image.Image, board_width_in: float, board_height_in: float, circle_diameter_in: float):
-  
+
+def prepare_image(
+    img: Image.Image,
+    board_width_in: float,
+    board_height_in: float,
+    circle_diameter_in: float,
+):
+
     w, h = img.size
     board_ar = board_width_in / board_height_in
     img_ar = w / h
 
     # Crop to match board aspect ratio
-    if img_ar > board_ar:  
+    if img_ar > board_ar:
         new_w = int(h * board_ar)
         crop_left = (w - new_w) // 2
         crop_right = crop_left + new_w
         img_cropped = img.crop((crop_left, 0, crop_right, h))
-    else:  
+    else:
         new_h = int(w / board_ar)
         crop_top = (h - new_h) // 2
         crop_bottom = crop_top + new_h
@@ -39,8 +43,9 @@ def prepare_image(img: Image.Image, board_width_in: float, board_height_in: floa
 
     return img_cropped, circle_radius_px, px_per_in_x, px_per_in_y
 
+
 def mouse_callback(event, x, y, flags, param):
- 
+
     global current_circle_center, original_img, circle_radius_px
 
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -54,10 +59,12 @@ def mouse_callback(event, x, y, flags, param):
 
     # Display mouse coordinates
     text = f"X: {x}, Y: {y}"
-    cv2.putText(display_img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                1, (0, 255, 0), 2)
+    cv2.putText(
+        display_img, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2
+    )
 
     cv2.imshow(WINDOW_NAME, display_img)
+
 
 def main():
     global original_img, current_circle_center, circle_radius_px
@@ -82,6 +89,7 @@ def main():
             break
 
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
