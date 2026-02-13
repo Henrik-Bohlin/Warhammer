@@ -1,3 +1,5 @@
 #.vscode
 #referensbildWARPED.webp
 #svart.jpg
+__pycache__/
+*.pyc
