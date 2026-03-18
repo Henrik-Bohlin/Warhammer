@@ -143,7 +143,7 @@ while True:
         cv2.imshow("Warped", warped)
  
     # Keys
-    key = cv2.waitKey(30) & 0xFF
+    key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
         break
     elif key == ord(' '):  # SPACE - capture, save, and exit
