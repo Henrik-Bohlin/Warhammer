@@ -14,7 +14,8 @@ import time
 # Setup
 DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
 DETECTOR = cv2.aruco.ArucoDetector(DICT)
-OUTPUT_SIZE = (1920, 1080)  # gameboard size 
+CAPTURE_SIZE = (4608, 2592)  # max resolution of RPi camera 3
+OUTPUT_SIZE = (3000, 2200)  # gameboard size 
  
  
 class PiCamera2Wrapper:
@@ -39,18 +40,21 @@ class PiCamera2Wrapper:
             pass
  
  
-def open_camera(width=1920, height=1080):
+def open_camera():
     """Try to open the camera via picamera2 (preferred) and fallback to OpenCV."""
     try:
         from picamera2 import Picamera2
         print("Trying picamera2...")
         picam2 = Picamera2()
         config = picam2.create_still_configuration(
-            main={"format": 'RGB888', "size": (width, height)}
+            main={"format": 'RGB888', "size": CAPTURE_SIZE},
+            controls={
+                "Sharpness": 2.0,
+            }
         )
         picam2.configure(config)
         picam2.start()
-        time.sleep(1)
+        time.sleep(2)
         print("Opened camera via picamera2")
         return PiCamera2Wrapper(picam2)
     except Exception as e:
@@ -61,8 +65,8 @@ def open_camera(width=1920, height=1080):
     if not cap.isOpened():
         print("Error: Could not open camera")
         return None
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_SIZE[0])
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_SIZE[1])
     return cap
  
  
