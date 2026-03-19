@@ -128,7 +128,7 @@ while True:
         dst = np.array([[0,0], [OUTPUT_SIZE[0],0], [0,OUTPUT_SIZE[1]], OUTPUT_SIZE], dtype=np.float32)
  
         M = cv2.getPerspectiveTransform(src, dst)
-        warped = cv2.warpPerspective(frame, M, OUTPUT_SIZE)
+        warped = cv2.warpPerspective(frame, M, OUTPUT_SIZE, flags=cv2.INTER_LANCZOS4)
  
         # Draw markers on display
         for pt in [tl, tr, bl, br]:
