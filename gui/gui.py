@@ -1,0 +1,397 @@
+"""
+Standalone Pygame GUI prototype for the Kill Team movement tool.
+Run directly:  python gui/gui.py
+Drop a warped board image at gui/background.png to use it as the background.
+"""
+
+import sys
+import os
+import math
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "movement_tool"))
+
+import pygame
+import numpy as np
+from shapely.geometry import Point, LineString, box
+from shapely.ops import nearest_points, unary_union
+from shapely.prepared import prep
+
+from entities import Terrain, Model
+from navigation import PathFinder
+
+# ── Board constants (mirror board.py) ──────────────────────────────────────
+BOARD_W = 32 + 2 * 0.5  # 33 inches total
+BOARD_H = 20 + 2 * 0.5  # 21 inches total
+LINE_T = 0.5
+MAX_MOVE = 6
+BASE_RADIUS = (32 / 25.4) / 2
+
+# ── Display ──────────────────────────────────────────────────────────────────
+WIN_W, WIN_H = 1280, 720  # RPi Touch Display 2 (landscape)
+SCALE = WIN_H / BOARD_H  # ≈ 34.3 px/inch, board fills full height
+STATUS_H = 32  # height of the status bar at the bottom
+
+BACKGROUND_IMG = os.path.join(
+    os.path.dirname(__file__), "..", "camera", "FullRes_withFLag.jpg"
+)
+
+# ── Colours ──────────────────────────────────────────────────────────────────
+C_BG = (30, 30, 40)
+C_WALL = (30, 39, 46)
+C_CWALL = (61, 61, 61, 0)
+C_GRID = (180, 180, 180, 20)
+C_REACH = (112, 161, 255, 100)
+C_REACH_EDGE = (0, 255, 136, 220)
+C_WALL_OVLY = (255, 255, 0, 180)
+C_MODEL = (211, 28, 43, 255)
+C_MODEL_RIM = (255, 255, 255, 200)
+C_PATH = (255, 220, 0)
+C_STATUS_BG = (0, 0, 0, 180)
+C_STATUS_FG = (200, 200, 200)
+
+
+def b2s(bx, by):
+    """Board inches → screen pixels (flips Y so board origin is bottom-left)."""
+    return int(bx * SCALE), int(WIN_H - by * SCALE)
+
+
+def s2b(sx, sy):
+    """Screen pixels → board inches."""
+    return sx / SCALE, (WIN_H - sy) / SCALE
+
+
+def poly_pts(shapely_poly):
+    """Shapely polygon exterior → list of screen-pixel tuples."""
+    return [b2s(x, y) for x, y in shapely_poly.exterior.coords]
+
+
+def hole_pts(ring):
+    """Shapely interior ring → list of screen-pixel tuples."""
+    return [b2s(x, y) for x, y in ring.coords]
+
+
+def iter_polys(geom):
+    """Yield individual Polygon objects from a Polygon or MultiPolygon."""
+    if geom.is_empty:
+        return
+    if geom.geom_type == "MultiPolygon":
+        yield from geom.geoms
+    elif geom.geom_type == "Polygon":
+        yield geom
+
+
+# ── Board state (pure logic, no matplotlib) ──────────────────────────────────
+class BoardState:
+    def __init__(self):
+        self.board_width = BOARD_W
+        self.board_height = BOARD_H
+        self.linethickness = LINE_T
+        self.max_move = MAX_MOVE
+        self.base_radius = BASE_RADIUS
+
+        self.entities = Terrain(BOARD_W, BOARD_H, LINE_T)
+        self.combined_walls = self.entities.combined_walls
+
+        self.collision_walls_list = [
+            w.buffer(BASE_RADIUS, quad_segs=3) for w in self.entities.walls_list
+        ]
+        self.collision_walls = unary_union(self.collision_walls_list)
+
+        _cw_geoms = (
+            list(self.collision_walls.geoms)
+            if self.collision_walls.geom_type == "MultiPolygon"
+            else [self.collision_walls]
+        )
+
+        _wp_list = []
+        for g in _cw_geoms:
+            for c in list(g.exterior.coords)[:-1]:
+                _wp_list.append(c)
+            for hole in g.interiors:
+                for c in list(hole.coords)[:-1]:
+                    _wp_list.append(c)
+        self.collision_wall_points = [Point(c) for c in _wp_list]
+        self.wall_points_xy = np.array(_wp_list)
+
+        self.collision_edges = []
+        for wall in self.collision_walls_list:
+            coords = list(wall.exterior.coords)
+            for i in range(len(coords) - 1):
+                self.collision_edges.append(
+                    (np.array(coords[i]), np.array(coords[i + 1]))
+                )
+
+        self.prepped_collision_walls = prep(self.collision_walls)
+        self._collision_walls_render_buf = self.collision_walls.buffer(0.01)
+
+        self.legal_area = box(0, 0, BOARD_W, BOARD_H).difference(
+            self.collision_walls.buffer(0.05)
+        )
+
+        self.model_pos = None
+        self.current_model = None
+        self.navigator = PathFinder(self)
+        self.navigator.reach_segments = []
+        self.navigator.path_elements = []
+
+
+# ── GUI ───────────────────────────────────────────────────────────────────────
+class GUI:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.FULLSCREEN)
+        pygame.display.set_caption("Kill Team – Movement Tool")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont("monospace", 13)
+        self.font_bold = pygame.font.SysFont("monospace", 15, bold=True)
+
+        self.board = BoardState()
+
+        self._static_surf = self._build_static()
+        self._overlay_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+
+        self._path_lines = []  # ([(sx,sy)…], colour, width)
+        self._path_labels = []  # (sx, sy, text_str)
+        self._status = (
+            "Click to place model  |  Ctrl+Click to measure path  |  ESC to reset"
+        )
+
+    # ── static background ────────────────────────────────────────────────────
+    def _build_static(self):
+        surf = pygame.Surface((WIN_W, WIN_H))
+
+        # Use camera image if available, otherwise draw a plain board
+        if os.path.exists(BACKGROUND_IMG):
+            img = pygame.image.load(BACKGROUND_IMG).convert()
+            rail_px = int(LINE_T * SCALE)
+            inner_w = WIN_W - 2 * rail_px
+            inner_h = WIN_H - 2 * rail_px
+            surf.fill(C_BG)
+            surf.blit(
+                pygame.transform.scale(img, (inner_w, inner_h)), (rail_px, rail_px)
+            )
+        else:
+            surf.fill(C_BG)
+            self._draw_grid(surf)
+
+        # Collision buffer (semi-transparent layer needs its own surface)
+        cwall_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        for cwall in self.board.collision_walls_list:
+            pts = poly_pts(cwall)
+            if len(pts) >= 3:
+                pygame.draw.polygon(cwall_surf, C_CWALL, pts)
+        surf.blit(cwall_surf, (0, 0))
+
+        # Raw walls (solid)
+        for wall in self.board.entities.walls_list:
+            pts = poly_pts(wall)
+            if len(pts) >= 3:
+                pygame.draw.polygon(surf, C_WALL, pts)
+
+        return surf
+
+    def _draw_grid(self, surf):
+        grid = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        for xi in range(int(BOARD_W) + 1):
+            sx, _ = b2s(xi + LINE_T, 0)
+            pygame.draw.line(grid, C_GRID, (sx, 0), (sx, WIN_H))
+        for yi in range(int(BOARD_H) + 1):
+            _, sy = b2s(0, yi + LINE_T)
+            pygame.draw.line(grid, C_GRID, (0, sy), (WIN_W, sy))
+        surf.blit(grid, (0, 0))
+
+    # ── reach overlay ────────────────────────────────────────────────────────
+    def _update_overlay(self):
+        self._overlay_surf.fill((0, 0, 0, 0))
+        nav = self.board.navigator
+
+        if nav.reach_poly and not nav.reach_poly.is_empty:
+            cw = self.board.collision_walls
+            wall_overlay = cw.intersection(nav.reach_poly)
+            blue_area = nav.reach_poly.difference(wall_overlay)
+
+            for p in iter_polys(blue_area):
+                pts = poly_pts(p)
+                if len(pts) >= 3:
+                    pygame.draw.polygon(self._overlay_surf, C_REACH, pts)
+                    pygame.draw.lines(self._overlay_surf, C_REACH_EDGE, True, pts, 2)
+
+            for p in iter_polys(wall_overlay):
+                try:
+                    pts = poly_pts(p)
+                    if len(pts) >= 3:
+                        pygame.draw.polygon(self._overlay_surf, C_WALL_OVLY, pts)
+                        for hole in p.interiors:
+                            hpts = hole_pts(hole)
+                            if len(hpts) >= 3:
+                                pygame.draw.polygon(self._overlay_surf, C_REACH, hpts)
+                except Exception:
+                    pass
+
+        if self.board.current_model:
+            m = self.board.current_model
+            sx, sy = b2s(m.x, m.y)
+            r_px = max(1, int(m.base_radius * SCALE))
+            pygame.draw.circle(self._overlay_surf, C_MODEL, (sx, sy), r_px)
+            pygame.draw.circle(self._overlay_surf, C_MODEL_RIM, (sx, sy), r_px, 2)
+
+    # ── path tracing ─────────────────────────────────────────────────────────
+    def _trace_path(self, target_pt):
+        self._path_lines = []
+        self._path_labels = []
+        nav = self.board.navigator
+        board = self.board
+
+        curr_pt = target_pt
+        pts_in_order = [target_pt]
+        visited = set()
+
+        while curr_pt.distance(board.model_pos) > 0.01:
+            ck = (round(curr_pt.x, 4), round(curr_pt.y, 4))
+            visited.add(ck)
+            found = False
+            for s in nav.reach_segments:
+                sk = (round(s["origin"].x, 4), round(s["origin"].y, 4))
+                if sk in visited:
+                    continue
+                if s["poly"].distance(curr_pt) < 0.01:
+                    pts_in_order.append(s["origin"])
+                    curr_pt = s["origin"]
+                    found = True
+                    break
+            if not found:
+                break
+
+        pts_in_order.reverse()
+        total_dist = 0
+
+        for i in range(len(pts_in_order) - 1):
+            p_start, p_end = pts_in_order[i], pts_in_order[i + 1]
+            vec = np.array([p_end.x - p_start.x, p_end.y - p_start.y])
+            seg_len = np.linalg.norm(vec)
+            if seg_len < 0.01:
+                continue
+            u_vec = vec / seg_len
+
+            raw_line = LineString([(p_start.x, p_start.y), (p_end.x, p_end.y)])
+            clipped = raw_line.difference(board.collision_walls)
+            if not clipped.is_empty:
+                parts = list(clipped.geoms) if hasattr(clipped, "geoms") else [clipped]
+                for part in parts:
+                    lx, ly = part.xy
+                    self._path_lines.append(
+                        ([b2s(x, y) for x, y in zip(lx, ly)], C_PATH, 2)
+                    )
+
+            for inch in range(1, int(seg_len) + 1):
+                m_pos = np.array([p_start.x, p_start.y]) + u_vec * inch
+                if board.prepped_collision_walls.contains(Point(m_pos[0], m_pos[1])):
+                    continue
+                sx, sy = b2s(m_pos[0], m_pos[1])
+                self._path_labels.append((sx, sy, f'{inch}"'))
+
+            total_dist += math.ceil(seg_len)
+
+        self._status = f'Path: {total_dist}" / {MAX_MOVE}"  |  Click to reposition  |  ESC to reset'
+
+    # ── frame rendering ───────────────────────────────────────────────────────
+    def _draw_frame(self):
+        self.screen.blit(self._static_surf, (0, 0))
+        self.screen.blit(self._overlay_surf, (0, 0))
+
+        for pts, colour, width in self._path_lines:
+            if len(pts) >= 2:
+                pygame.draw.lines(self.screen, colour, False, pts, width)
+
+        for sx, sy, text in self._path_labels:
+            pygame.draw.circle(self.screen, (255, 255, 255), (sx, sy), 4)
+            lbl = self.font.render(text, True, (255, 255, 255))
+            bg = pygame.Surface(
+                (lbl.get_width() + 6, lbl.get_height() + 4), pygame.SRCALPHA
+            )
+            bg.fill((0, 0, 0, 180))
+            self.screen.blit(bg, (sx - lbl.get_width() // 2 - 3, sy - 18))
+            self.screen.blit(lbl, (sx - lbl.get_width() // 2, sy - 17))
+
+        # Status bar
+        bar = pygame.Surface((WIN_W, STATUS_H), pygame.SRCALPHA)
+        bar.fill(C_STATUS_BG)
+        lbl = self.font_bold.render(self._status, True, C_STATUS_FG)
+        bar.blit(lbl, (10, (STATUS_H - lbl.get_height()) // 2))
+        self.screen.blit(bar, (0, WIN_H - STATUS_H))
+
+        pygame.display.flip()
+
+    # ── main event loop ───────────────────────────────────────────────────────
+    def run(self):
+        ctrl_held = False
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
+                        ctrl_held = True
+                    elif event.key in (pygame.K_q,):
+                        pygame.quit()
+                        return
+                    elif event.key == pygame.K_ESCAPE:
+                        if self.board.current_model is not None:
+                            self.board.current_model = None
+                            self.board.model_pos = None
+                            self.board.navigator.reach_poly = None
+                            self.board.navigator.reach_segments = []
+                            self._path_lines = []
+                            self._path_labels = []
+                            self._update_overlay()
+                            self._status = "Click to place model  |  Ctrl+Click to measure path  |  ESC to reset"
+                        else:
+                            pygame.quit()
+                            return
+
+                elif event.type == pygame.KEYUP:
+                    if event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
+                        ctrl_held = False
+
+                # Both mouse clicks and touchscreen taps arrive here on RPi
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    bx, by = s2b(*event.pos)
+                    raw_pos = Point(bx, by)
+                    nav = self.board.navigator
+
+                    if ctrl_held and self.board.current_model:
+                        target = raw_pos
+                        if nav.reach_poly and not nav.reach_poly.contains(target):
+                            target, _ = nearest_points(nav.reach_poly, target)
+                        self._trace_path(target)
+                    else:
+                        self._path_lines = []
+                        self._path_labels = []
+                        if not self.board.legal_area.contains(raw_pos):
+                            final_pos, _ = nearest_points(
+                                self.board.legal_area, raw_pos
+                            )
+                        else:
+                            final_pos = raw_pos
+
+                        self.board.model_pos = final_pos
+                        self.board.current_model = Model(final_pos.x, final_pos.y)
+                        self._status = "Computing reach area…"
+                        self._draw_frame()  # show feedback before the heavy compute
+
+                        nav.calculate_total_reach(final_pos, MAX_MOVE)
+                        self._update_overlay()
+                        self._status = (
+                            f'Model at ({final_pos.x:.1f}", {final_pos.y:.1f}")  |  '
+                            "Ctrl+Click to measure path  |  ESC to reset"
+                        )
+
+            self._draw_frame()
+            self.clock.tick(60)
+
+
+if __name__ == "__main__":
+    GUI().run()

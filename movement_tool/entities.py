@@ -49,8 +49,8 @@ class Terrain:
         walls_list.append(box(4.5, 0, 5.5, 10.5))
         walls_list.append(box(26.5, 0, 27.5, 17))
         walls_list.append(box(4.5, 9.5, 26.5, 10.5))
-        walls_list.append(box(13.5, 10.5, 14.5, 20))
-        walls_list.append(box(18.5, 10.5, 19.5, 20))
+        walls_list.append(box(13.5, 10.5, 14.5, self.board_height - self.linethickness))
+        walls_list.append(box(18.5, 10.5, 19.5, self.board_height - self.linethickness))
 
         walls_list.append(box(12.0, 3, 20.0, 4))
 
