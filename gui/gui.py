@@ -20,19 +20,23 @@ from entities import Terrain, Model
 from navigation import PathFinder
 
 # ── Board constants (mirror board.py) ──────────────────────────────────────
-BOARD_W = 32 + 2 * 0.5  # 33 inches total
-BOARD_H = 20 + 2 * 0.5  # 21 inches total
+BOARD_W = 29 + 2 * 0.5  # 30 inches total
+BOARD_H = 21 + 2 * 0.5  # 22 inches total
 LINE_T = 0.5
 MAX_MOVE = 6
 BASE_RADIUS = (32 / 25.4) / 2
 
 # ── Display ──────────────────────────────────────────────────────────────────
-WIN_W, WIN_H = 1280, 720  # RPi Touch Display 2 (landscape)
-SCALE = WIN_H / BOARD_H  # ≈ 34.3 px/inch, board fills full height
-STATUS_H = 32  # height of the status bar at the bottom
+WIN_W, WIN_H = 1920, 1080  # Laptop 1080p display (landscape)
+SCALE = WIN_H / BOARD_H  # ≈ 51.4 px/inch, board fills full height
+BOARD_PX_W = int(BOARD_W * SCALE)  # board width in pixels
+BOARD_PX_H = int(BOARD_H * SCALE)  # board height in pixels
+BOARD_OFFSET_X = (WIN_W - BOARD_PX_W) // 2  # horizontal centering offset
+BOARD_OFFSET_Y = (WIN_H - BOARD_PX_H) // 2  # vertical centering offset (≈ 0)
+STATUS_H = 36  # height of the status bar at the bottom
 
 BACKGROUND_IMG = os.path.join(
-    os.path.dirname(__file__), "..", "camera", "FullRes_withFLag.jpg"
+    os.path.dirname(__file__), "..", "camera", "spelplannya_warped.jpg"
 )
 
 # ── Colours ──────────────────────────────────────────────────────────────────
@@ -52,12 +56,12 @@ C_STATUS_FG = (200, 200, 200)
 
 def b2s(bx, by):
     """Board inches → screen pixels (flips Y so board origin is bottom-left)."""
-    return int(bx * SCALE), int(WIN_H - by * SCALE)
+    return int(bx * SCALE) + BOARD_OFFSET_X, int(WIN_H - by * SCALE) - BOARD_OFFSET_Y
 
 
 def s2b(sx, sy):
     """Screen pixels → board inches."""
-    return sx / SCALE, (WIN_H - sy) / SCALE
+    return (sx - BOARD_OFFSET_X) / SCALE, (WIN_H - sy + BOARD_OFFSET_Y) / SCALE
 
 
 def poly_pts(shapely_poly):
@@ -142,8 +146,8 @@ class GUI:
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.FULLSCREEN)
         pygame.display.set_caption("Kill Team – Movement Tool")
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("monospace", 13)
-        self.font_bold = pygame.font.SysFont("monospace", 15, bold=True)
+        self.font = pygame.font.SysFont("monospace", 18)
+        self.font_bold = pygame.font.SysFont("monospace", 20, bold=True)
 
         self.board = BoardState()
 
@@ -163,16 +167,14 @@ class GUI:
         # Use camera image if available, otherwise draw a plain board
         if os.path.exists(BACKGROUND_IMG):
             img = pygame.image.load(BACKGROUND_IMG).convert()
-            rail_px = int(LINE_T * SCALE)
-            inner_w = WIN_W - 2 * rail_px
-            inner_h = WIN_H - 2 * rail_px
             surf.fill(C_BG)
             surf.blit(
-                pygame.transform.scale(img, (inner_w, inner_h)), (rail_px, rail_px)
+                pygame.transform.scale(img, (BOARD_PX_W, BOARD_PX_H)),
+                (BOARD_OFFSET_X, BOARD_OFFSET_Y),
             )
         else:
             surf.fill(C_BG)
-            self._draw_grid(surf)
+        self._draw_grid(surf)
 
         # Collision buffer (semi-transparent layer needs its own surface)
         cwall_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
@@ -192,12 +194,16 @@ class GUI:
 
     def _draw_grid(self, surf):
         grid = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        board_left = BOARD_OFFSET_X
+        board_right = BOARD_OFFSET_X + BOARD_PX_W
+        board_top = BOARD_OFFSET_Y
+        board_bottom = BOARD_OFFSET_Y + BOARD_PX_H
         for xi in range(int(BOARD_W) + 1):
             sx, _ = b2s(xi + LINE_T, 0)
-            pygame.draw.line(grid, C_GRID, (sx, 0), (sx, WIN_H))
+            pygame.draw.line(grid, C_GRID, (sx, board_top), (sx, board_bottom))
         for yi in range(int(BOARD_H) + 1):
             _, sy = b2s(0, yi + LINE_T)
-            pygame.draw.line(grid, C_GRID, (0, sy), (WIN_W, sy))
+            pygame.draw.line(grid, C_GRID, (board_left, sy), (board_right, sy))
         surf.blit(grid, (0, 0))
 
     # ── reach overlay ────────────────────────────────────────────────────────

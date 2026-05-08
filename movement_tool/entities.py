@@ -45,14 +45,14 @@ class Terrain:
                 self.board_height,
             )
         )
-        # Internal walls
-        walls_list.append(box(4.5, 0, 5.5, 10.5))
-        walls_list.append(box(26.5, 0, 27.5, 17))
-        walls_list.append(box(4.5, 9.5, 26.5, 10.5))
-        walls_list.append(box(13.5, 10.5, 14.5, self.board_height - self.linethickness))
-        walls_list.append(box(18.5, 10.5, 19.5, self.board_height - self.linethickness))
+        # Internal walls (coordinates scaled from original 33"×21" blueprint to 30"×22")
+        walls_list.append(box(4.1, 0, 5.0, 11.0))
+        walls_list.append(box(24.1, 0, 25.0, 17.8))
+        walls_list.append(box(4.1, 10.0, 24.1, 11.0))
+        walls_list.append(box(12.3, 11.0, 13.2, self.board_height - self.linethickness))
+        walls_list.append(box(16.8, 11.0, 17.7, self.board_height - self.linethickness))
 
-        walls_list.append(box(12.0, 3, 20.0, 4))
+        walls_list.append(box(10.9, 3.1, 18.2, 4.2))
 
         return walls_list
 

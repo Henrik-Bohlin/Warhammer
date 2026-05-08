@@ -11,11 +11,11 @@ from shapely.prepared import prep
 class Board:
     def __init__(self):
         # --- 1. Dimensions & Unit Constants ---
-        self.board_width = 32 + 2 * 0.5  # 32 inches playable + 2 wall thicknesses
-        self.board_height = 20 + 2 * 0.5  # 20 inches playable + 2 wall thicknesses
+        self.board_width = 29 + 2 * 0.5  # 29 inches playable + 2 wall thicknesses
+        self.board_height = 21 + 2 * 0.5  # 21 inches playable + 2 wall thicknesses
         self.linethickness = 0.5  # Matches Terrain defaults
-        self.playable_width = 32  # Actual playable area
-        self.playable_height = 20  # Actual playable area
+        self.playable_width = 29  # Actual playable area
+        self.playable_height = 21  # Actual playable area
         self.max_move = 6
         self.base_radius = (32 / 25.4) / 2  # 32mm base radius in inches
         self.visual_padding = 0.05
