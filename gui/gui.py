@@ -4,6 +4,7 @@ Run directly:  python gui/gui.py
 Drop a warped board image at gui/background.png to use it as the background.
 """
 
+#from bdb import effective
 import sys
 import os
 import math
@@ -15,7 +16,7 @@ import numpy as np
 from shapely.geometry import Point, LineString, box
 from shapely.ops import nearest_points, unary_union
 from shapely.prepared import prep
-
+from menu import show_movement_menu
 from entities import Terrain, Model
 from navigation import PathFinder
 
@@ -23,13 +24,25 @@ from navigation import PathFinder
 BOARD_W = 32 + 2 * 0.5  # 33 inches total
 BOARD_H = 20 + 2 * 0.5  # 21 inches total
 LINE_T = 0.5
-MAX_MOVE = 6
+
 BASE_RADIUS = (32 / 25.4) / 2
 
 # ── Display ──────────────────────────────────────────────────────────────────
 WIN_W, WIN_H = 1280, 720  # RPi Touch Display 2 (landscape)
 SCALE = WIN_H / BOARD_H  # ≈ 34.3 px/inch, board fills full height
 STATUS_H = 32  # height of the status bar at the bottom
+
+# Initialize pygame and create the window BEFORE showing the menu
+pygame.init()
+screen = pygame.display.set_mode((WIN_W, WIN_H))
+pygame.display.set_caption("Warhammer Movement Tool")
+font = pygame.font.SysFont("monospace", 30)
+
+MAX_MOVE = show_movement_menu(screen, font)
+DASH_LENGTH = 3
+CHARGE_LENGTH = 2
+
+
 
 BACKGROUND_IMG = os.path.join(
     os.path.dirname(__file__), "..", "camera", "FullRes_withFLag.jpg"
@@ -146,7 +159,7 @@ class GUI:
         self.font_bold = pygame.font.SysFont("monospace", 15, bold=True)
 
         self.board = BoardState()
-
+        self.move_mode = "normal"
         self._static_surf = self._build_static()
         self._overlay_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
 
@@ -154,6 +167,26 @@ class GUI:
         self._path_labels = []  # (sx, sy, text_str)
         self._status = (
             "Click to place model  |  Ctrl+Click to measure path  |  ESC to reset"
+        )
+
+    def _effective_move(self):
+        if self.move_mode == "dash":
+            return MAX_MOVE + DASH_LENGTH
+        elif self.move_mode == "charge":
+            return MAX_MOVE + CHARGE_LENGTH
+        return MAX_MOVE
+    
+    def _recompute_reach(self):
+        nav = self.board.navigator
+        nav.calculate_total_reach(self.board.model_pos, self._effective_move())
+        self._update_overlay()
+        self._path_lines = []
+        self._path_labels = []
+        
+        mode_label = self.move_mode.upper() if self.move_mode != "normal" else "MOVE"
+        self._status = (
+            f'{mode_label}  |  Reach: {self._effective_move()}"  |  '
+            "D=dash  C=charge  ESC=reset"
         )
 
     # ── static background ────────────────────────────────────────────────────
@@ -322,6 +355,7 @@ class GUI:
 
         pygame.display.flip()
 
+   
     # ── main event loop ───────────────────────────────────────────────────────
     def run(self):
         ctrl_held = False
@@ -348,10 +382,25 @@ class GUI:
                             self._path_labels = []
                             self._update_overlay()
                             self._status = "Click to place model  |  Ctrl+Click to measure path  |  ESC to reset"
-                        else:
-                            pygame.quit()
-                            return
+                    elif event.key == pygame.K_d:
+                        if self.board.current_model is not None:
+                            self.move_mode = "normal" if self.move_mode == "dash" else "dash"
+                            self._recompute_reach()
 
+                    elif event.key == pygame.K_c:
+                        if self.board.current_model is not None:
+                         self.move_mode = "normal" if self.move_mode == "charge" else "charge"
+                         self._recompute_reach()
+                    elif event.key == pygame.K_m:
+                        global MAX_MOVE
+                        MAX_MOVE = show_movement_menu(self.screen, self.font)
+                        self.board.max_move = MAX_MOVE
+                        if self.board.current_model is not None:
+                            self._recompute_reach() 
+
+
+
+    
                 elif event.type == pygame.KEYUP:
                     if event.key in (pygame.K_LCTRL, pygame.K_RCTRL):
                         ctrl_held = False
@@ -382,16 +431,17 @@ class GUI:
                         self._status = "Computing reach area…"
                         self._draw_frame()  # show feedback before the heavy compute
 
-                        nav.calculate_total_reach(final_pos, MAX_MOVE)
+                        
+                        nav.calculate_total_reach(final_pos, self._effective_move())
                         self._update_overlay()
+                        mode_label = self.move_mode.upper() if self.move_mode != "normal" else ""
                         self._status = (
                             f'Model at ({final_pos.x:.1f}", {final_pos.y:.1f}")  |  '
-                            "Ctrl+Click to measure path  |  ESC to reset"
-                        )
-
+                            f'Reach: {self._effective_move()}" {mode_label}  |  '
+                            "Ctrl+Click to measure path  |  D=dash  C=charge  |  ESC to reset"
+                    )
             self._draw_frame()
-            self.clock.tick(60)
-
+            self.clock.tick(30)
 
 if __name__ == "__main__":
     GUI().run()
