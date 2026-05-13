@@ -11,11 +11,9 @@ from shapely.prepared import prep
 class Board:
     def __init__(self):
         # --- 1. Dimensions & Unit Constants ---
-        self.board_width = 29 + 2 * 0.5  # 29 inches playable + 2 wall thicknesses
-        self.board_height = 21 + 2 * 0.5  # 21 inches playable + 2 wall thicknesses
-        self.linethickness = 0.5  # Matches Terrain defaults
-        self.playable_width = 29  # Actual playable area
-        self.playable_height = 21  # Actual playable area
+        self.board_width = 30
+        self.board_height = 22
+        self.linethickness = 0.2
         self.max_move = 6
         self.base_radius = (32 / 25.4) / 2  # 32mm base radius in inches
         self.visual_padding = 0.05
@@ -101,7 +99,6 @@ class Board:
         self.axes.set_xlim(0, self.board_width)
         self.axes.set_ylim(0, self.board_height)
 
-        # 3. Grid system — ticks start from inside the outer walls (linethickness offset)
         x_ticks = np.arange(self.linethickness, self.board_width, 1)
         y_ticks = np.arange(self.linethickness, self.board_height, 1)
         self.axes.set_xticks(x_ticks)
@@ -218,106 +215,11 @@ class Board:
 
         self.update_window()
 
-    def get_reach_boundary(self):
-        """
-        Returns all laser-traceable boundary rings of the current reach area
-        in playable-area inches (origin at inside of bottom-left wall).
-        Includes:
-          - outer edge of the total reach area
-          - edges of the model-base offset zones hugging the walls
-        Returns a list of rings; each ring is a list of (x, y) tuples.
-        Returns an empty list if no reach area exists.
-        """
-        poly = self.navigator.reach_poly
-        if poly is None or poly.is_empty:
-            return []
-
-        offset = self.linethickness
-
-        def to_playable(coords):
-            return [(x - offset, y - offset) for x, y in coords]
-
-        rings = []
-
-        # Outer reach boundary
-        reach_polys = list(poly.geoms) if poly.geom_type == "MultiPolygon" else [poly]
-        for p in reach_polys:
-            rings.append(to_playable(p.exterior.coords))
-
-        return rings
-
-    def export_boundary_png(self):
-        if not self.navigator.reach_poly:
-            print("No reach area to export.")
-            return
-
-        from matplotlib.path import Path as MplPath
-
-        fig, ax = plt.subplots(figsize=(16, 10))
-        ax.set_aspect("equal")
-        ax.set_xlim(0, self.board_width)
-        ax.set_ylim(0, self.board_height)
-        ax.axis("off")
-        fig.patch.set_facecolor("black")
-
-        # Rasterise the blue area (reach minus wall-offset zone) onto a fine grid,
-        # then extract a clean contour — boundary is only the outer arc and the
-        # base-radius offset arcs, never raw wall-face edges.
-        wall_overlay = self.collision_walls.intersection(self.navigator.reach_poly)
-        blue_area = self.navigator.reach_poly.difference(wall_overlay)
-
-        resolution = 0.02  # inches per grid cell (~1.5 px at 150 dpi export)
-        x_pts = np.arange(0, self.board_width + resolution, resolution)
-        y_pts = np.arange(0, self.board_height + resolution, resolution)
-        X, Y = np.meshgrid(x_pts, y_pts)
-        pts = np.column_stack([X.ravel(), Y.ravel()])
-
-        def to_mpl_path(polygon):
-            verts, codes = [], []
-            for ring in [polygon.exterior, *polygon.interiors]:
-                coords = list(ring.coords)
-                verts += coords
-                codes += (
-                    [MplPath.MOVETO]
-                    + [MplPath.LINETO] * (len(coords) - 2)
-                    + [MplPath.CLOSEPOLY]
-                )
-            return MplPath(verts, codes)
-
-        polys = (
-            list(blue_area.geoms)
-            if blue_area.geom_type == "MultiPolygon"
-            else [blue_area] if not blue_area.is_empty else []
-        )
-        mask = np.zeros(pts.shape[0], dtype=bool)
-        for poly in polys:
-            mask |= to_mpl_path(poly).contains_points(pts)
-        mask = mask.reshape(X.shape)
-
-        ax.contour(
-            X, Y, mask.astype(float), levels=[0.5], colors=["#00ff88"], linewidths=1.5
-        )
-
-        # Model position dot
-        ax.plot(
-            self.model_pos.x, self.model_pos.y, "o", color="#00ff88", ms=5, zorder=10
-        )
-
-        plt.tight_layout(pad=0)
-        filename = "reach_boundary.png"
-        fig.savefig(filename, dpi=150, bbox_inches="tight", facecolor="black")
-        plt.close(fig)
-        print(f"Exported boundary to {filename}")
-
     def update_window(self):
         self.setup_plot()
         self.window_frame.canvas.draw()
 
     def on_key(self, event):
-        if event.key == "c":
-            self.export_boundary_png()
-            return
-
         # We only care about the Escape key
         if event.key == "escape":
             # If a model exists, just clear the board (Reset)

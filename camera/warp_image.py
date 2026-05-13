@@ -62,7 +62,7 @@ def detect_all_four(frame):
 input_path = (
     sys.argv[1]
     if len(sys.argv) > 1
-    else os.path.join(os.path.dirname(__file__), "spelplannya.jpg")
+    else os.path.join(os.path.dirname(__file__), "volkov.jpg")
 )
 
 frame = cv2.imread(input_path)
