@@ -142,7 +142,7 @@ class Board:
                     )
                     for seg in segs:
                         sx, sy = seg.xy
-                        self.axes.plot(sx, sy, color="#00ff88", lw=1.5, zorder=3)
+                        self.axes.plot(sx, sy, color="#70a1ff", lw=1.5, zorder=3)
 
         # 6. Render yellow offset zone around walls
         if self.navigator.reach_poly:
@@ -175,13 +175,11 @@ class Board:
                         )
                         for geom in geoms:
                             gx, gy = geom.xy
-                            self.axes.plot(gx, gy, color="#00ff88", lw=1.5, zorder=6)
+                            self.axes.plot(gx, gy, color="#70a1ff", lw=1.5, zorder=6)
 
         # 7. Render the Model
         if hasattr(self, "current_model") and self.current_model:
             self.current_model.draw(self.axes)
-
-    from shapely.geometry import Point, box  # Ensure 'box' is imported
 
     def on_click(self, event):
         if event.xdata is None or event.ydata is None:
@@ -230,7 +228,7 @@ class Board:
                 self.navigator.reach_poly = None
                 self.update_window()
             else:
-                # If board is already empty, close the app (Close)
+                # If board is already empty, close the app
                 print("Exiting application...")
                 plt.close(self.window_frame)
 
