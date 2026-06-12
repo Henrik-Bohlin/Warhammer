@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
-reach_boundary.png
+camera/*.png
+camera/*.jpg
+camera/*.jpeg
