@@ -3,3 +3,7 @@ __pycache__/
 camera/*.png
 camera/*.jpg
 camera/*.jpeg
+
+# Keep map background assets used by gui/maps.py
+!camera/TombWorldMap1.jpg
+!camera/VolkusMap1.jpg
